@@ -36,6 +36,25 @@
 #include "storage/gamma_scankeys.h"
 
 
+static inline void
+cvtable_release_ref_cv_list(CVScanDesc cvscan)
+{
+	if (unlikely(cvscan == NULL))
+		return;
+
+	if (cvscan->ref_cv_list != NULL)
+	{
+		ListCell *lc_cvr;
+		foreach (lc_cvr, cvscan->ref_cv_list)
+		{
+			GammaBufferTag *tag = (GammaBufferTag *) lfirst(lc_cvr);
+			gamma_buffer_release_cv(tag->relid, tag->rgid, tag->attno);
+		}
+
+		cvscan->ref_cv_list = NULL;
+	}
+}
+
 CVScanDesc
 cvtable_beginscan(Relation rel, Snapshot snapshot, int nkeys,
 		struct ScanKeyData * key,
@@ -68,6 +87,7 @@ cvtable_beginscan(Relation rel, Snapshot snapshot, int nkeys,
 											ALLOCSET_DEFAULT_SIZES); 
 	cvscan->rg = gamma_rg_build(rel);
 	cvscan->offset = 0;
+	cvscan->ref_cv_list = NULL;
 
 	if (parallel_scan)
 	{
@@ -147,6 +167,7 @@ cvtable_load_scankey_cv(CVScanDesc cvscan, uint32 rgid,
 	text *text_nulls = NULL;
 
 	gamma_buffer_cv read_buffer_cv;
+	GammaBufferTag *tag;
 
 	if (!gamma_buffer_get_cv(RelationGetRelid(cvscan->base_rel),
 							rgid, attno, &read_buffer_cv))
@@ -248,7 +269,21 @@ cvtable_load_scankey_cv(CVScanDesc cvscan, uint32 rgid,
 
 			if (!gamma_buffer_get_cv(RelationGetRelid(cvscan->base_rel),
 					rgid, attno, &read_buffer_cv))
+			{
 				elog(ERROR, "load CV: gamma shared buffers is not enough.");
+			}
+			else
+			{
+				/* pin the cv in buffer */
+				gamma_buffer_register_cv(RelationGetRelid(cvscan->base_rel),
+											rgid, attno);
+
+				tag = (GammaBufferTag *) palloc(sizeof(GammaBufferTag));
+				tag->relid = RelationGetRelid(cvscan->base_rel);
+				tag->rgid = rgid;
+				tag->attno = attno;
+				cvscan->ref_cv_list = lappend(cvscan->ref_cv_list, tag);
+			}
 		}
 
 		if ((void *)text_data != DatumGetPointer(datum_data))
@@ -256,6 +291,17 @@ cvtable_load_scankey_cv(CVScanDesc cvscan, uint32 rgid,
 
 		if (!non_nulls && (void *)text_nulls != DatumGetPointer(datum_nulls))
 			pfree(text_nulls);
+	}
+	else
+	{
+		/* pin the cv in buffer */
+		gamma_buffer_register_cv(RelationGetRelid(cvscan->base_rel), rgid, attno);
+
+		tag = (GammaBufferTag *) palloc(sizeof(GammaBufferTag));
+		tag->relid = RelationGetRelid(cvscan->base_rel);
+		tag->rgid = rgid;
+		tag->attno = attno;
+		cvscan->ref_cv_list = lappend(cvscan->ref_cv_list, tag);
 	}
 
 	if (sk_check && (read_buffer_cv.max != NULL || read_buffer_cv.min != NULL))
@@ -287,6 +333,11 @@ cvtable_load_rg(CVScanDesc cvscan, uint32 rgid)
 	MemoryContext old_context = NULL;
 	TupleDesc base_desc = RelationGetDescr(cvscan->base_rel);
 
+	/* release the CV reference in previous loading */
+	if (cvscan->ref_cv_list != NULL)
+		cvtable_release_ref_cv_list(cvscan);
+
+	/* reset the per-rowgroup memory context */
 	if (cvscan->rg_context != NULL)
 	{
 		MemoryContextResetOnly(cvscan->rg_context);
@@ -639,6 +690,9 @@ cvtable_rescan(CVScanDesc scan, struct ScanKeyData * key,
 		bool set_params, bool allow_strat, bool allow_sync,
 		bool allow_pagemode)
 {
+	if (scan->ref_cv_list != NULL)
+		cvtable_release_ref_cv_list(scan);
+
 	return;
 }
 
@@ -647,6 +701,9 @@ cvtable_endscan(CVScanDesc cvscan)
 {
 	if (cvscan->cv_slot != NULL)
 		ExecDropSingleTupleTableSlot(cvscan->cv_slot);
+
+	if (cvscan->ref_cv_list != NULL)
+		cvtable_release_ref_cv_list(cvscan);
 
 	if (cvscan->rg)
 		gamma_rg_free(cvscan->rg);
