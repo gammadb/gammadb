@@ -16,11 +16,24 @@
 #ifndef GAMMA_BUFFER_H
 #define GAMMA_BUFFER_H
 
+#include "access/attnum.h"
+#include "utils/resowner.h"
+
 #include "storage/gamma_toc.h"
+
+typedef struct GammaBufferTag
+{
+	Oid relid;
+	Oid rgid;
+	AttrNumber attno;
+} GammaBufferTag;
 
 extern void gamma_buffer_startup(void);
 extern bool gamma_buffer_add_cv(Oid relid, Oid rgid, int16 attno, gamma_buffer_cv *cv);
 extern bool gamma_buffer_get_cv(Oid relid, Oid rgid, int16 attno, gamma_buffer_cv *cv);
 extern void gamma_buffer_invalid_rel(Oid relid);
+
+extern void gamma_buffer_register_cv(Oid relid, Oid rgid, int16 attno);
+extern void gamma_buffer_release_cv(Oid relid, Oid rgid, int16 attno);
 
 #endif

@@ -82,6 +82,7 @@ typedef struct CVScanDescData {
 	/* row group data */
 	RowGroup *rg;
 	uint32 offset;		/* # rows have been processed */
+	List *ref_cv_list; /* per group CV reference list */
 
 	/* row group reset MemoryContext */
 	MemoryContext rg_context;
