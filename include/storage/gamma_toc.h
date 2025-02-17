@@ -32,6 +32,8 @@ typedef struct gamma_toc_entry
 	int16 flags;			/* for memory align, nouse now */
 	Size values_offset;		/* Offset, in bytes, from TOC start */
 	Size nbytes;
+	uint32 fifo_next;
+	uint32 fifo_prev;
 } gamma_toc_entry;
 
 #define GAMMA_MINMAX_LENGTH (16)

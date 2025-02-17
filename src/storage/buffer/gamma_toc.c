@@ -27,6 +27,8 @@ struct gamma_toc
 	LWLock		toc_lwlock;
 	Size		toc_total_bytes;	/* Bytes managed by this TOC */
 	Size		toc_allocated_bytes;	/* Bytes allocated of those managed */
+	slock_t		toc_fifo_lock;
+	uint32		toc_fifo_header; /* begin with 1, 0 means invalid */
 	uint32		toc_nentry;		/* Number of entries in TOC */
 	gamma_toc_entry toc_entry[FLEXIBLE_ARRAY_MEMBER];
 };
@@ -43,6 +45,8 @@ gamma_toc_create(uint64 magic, void *address, Size nbytes)
 	toc->toc_magic = magic;
 	LWLockInitialize(&toc->toc_lwlock, LWLockNewTrancheId());
 	LWLockRegisterTranche(toc->toc_lwlock.tranche, "gammadb_dsm_toc");
+
+	SpinLockInit(&toc->toc_fifo_lock);
 
 	/*
 	 * The alignment code in gamma_toc_allocate() assumes that the starting
@@ -100,7 +104,7 @@ gamma_toc_enough(gamma_toc *toc, Size nbytes)
  * Check if it is possible to take an entry that is already
  * invalid (all tuples have been removed)
  */
-static gamma_toc_entry *
+static uint32
 gamma_toc_invalid(gamma_toc *toc, Size nbytes)
 {
 	uint32 nentry;
@@ -112,10 +116,10 @@ gamma_toc_invalid(gamma_toc *toc, Size nbytes)
 	{
 		if (toc->toc_entry[i].flags & TOC_ENTRY_INVALID &&
 			toc->toc_entry[i].nbytes > nbytes)
-			return &(toc->toc_entry[i]);
+			return i + 1;
 	}
 
-	return NULL;
+	return 0;
 }
 
 static bool
@@ -203,33 +207,18 @@ gamma_toc_alloc(gamma_toc *toc, Size nbytes)
 	Size remain_bytes;
 	Size offset;
 
-	do
+	/* compute the free space */
+	total_bytes = vtoc->toc_total_bytes;
+	allocated_bytes = vtoc->toc_allocated_bytes;
+	nentry = vtoc->toc_nentry;
+	remain_bytes = offsetof(gamma_toc, toc_entry) +
+		(nentry * sizeof(gamma_toc_entry)) +
+		allocated_bytes;
+
+	/* Check for memory exhaustion and overflow. */
+	if (remain_bytes + nbytes <= total_bytes &&
+			remain_bytes + nbytes >= remain_bytes)
 	{
-		/* compute the free space */
-		total_bytes = vtoc->toc_total_bytes;
-		allocated_bytes = vtoc->toc_allocated_bytes;
-		nentry = vtoc->toc_nentry;
-		remain_bytes = offsetof(gamma_toc, toc_entry) +
-							(nentry * sizeof(gamma_toc_entry)) +
-							allocated_bytes;
-
-		/* Check for memory exhaustion and overflow. */
-		if (remain_bytes + nbytes > total_bytes ||
-			remain_bytes + nbytes < remain_bytes)
-		{
-			result = gamma_toc_invalid((gamma_toc *)vtoc, nbytes);
-			if (result == NULL)
-				break;
-				
-			if (gamma_toc_merge((gamma_toc *)vtoc, nbytes))
-				continue;
-
-			if (gamma_toc_lru((gamma_toc *)vtoc, nbytes))
-				continue;
-
-			elog(ERROR, "Gamma Share Memory is not enough.");
-		}
-
 		offset = total_bytes - allocated_bytes - nbytes;
 
 		vtoc->toc_allocated_bytes += nbytes;
@@ -240,9 +229,45 @@ gamma_toc_alloc(gamma_toc *toc, Size nbytes)
 		result->values_offset = offset;
 		result->nbytes = nbytes;
 
-		return result;
+		SpinLockAcquire(&toc->toc_fifo_lock);
 
-	} while(1);
+		result->fifo_prev = 0; /* invalid */
+		result->fifo_next = toc->toc_fifo_header;
+		if (toc->toc_fifo_header != 0)
+			toc->toc_entry[toc->toc_fifo_header - 1].fifo_prev = nentry + 1;
+		toc->toc_fifo_header = nentry + 1;
+
+		SpinLockRelease(&toc->toc_fifo_lock);
+	}
+
+	gamma_toc_merge((gamma_toc *)vtoc, nbytes);
+
+	nentry = gamma_toc_invalid((gamma_toc *)vtoc, nbytes);
+	if (nentry != 0)
+	{
+		result = &(toc->toc_entry[nentry - 1]);
+		SpinLockAcquire(&toc->toc_fifo_lock);
+
+		toc->toc_entry[result->fifo_prev].fifo_next = result->fifo_next;
+		toc->toc_entry[result->fifo_next].fifo_prev = result->fifo_prev;
+
+		result->fifo_prev = 0; /* invalid */
+		result->fifo_next = toc->toc_fifo_header;
+		toc->toc_entry[toc->toc_fifo_header - 1].fifo_prev = nentry;
+		toc->toc_fifo_header = nentry;
+
+		SpinLockRelease(&toc->toc_fifo_lock);
+
+		return result;
+	}
+
+
+
+			if (gamma_toc_lru((gamma_toc *)vtoc, nbytes))
+				continue;
+
+
+
 
 	return NULL;
 }
