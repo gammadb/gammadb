@@ -317,7 +317,7 @@ tts_vector_slot_from_rg(TupleTableSlot *slot, RowGroup *rg,
 	vdatum *column;
 	ColumnVector *cv;
 	uint32 count;
-	
+
 	count = rg->dim - offset > VECTOR_SIZE ? VECTOR_SIZE : rg->dim - offset;
 
 	if (bms_proj != NULL)
