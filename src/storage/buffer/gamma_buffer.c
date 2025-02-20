@@ -122,3 +122,54 @@ gamma_buffer_invalid_rel(Oid relid)
 	gamma_toc_invalid_rel(toc, relid);
 	gamma_toc_lock_release(toc);
 }
+
+static void
+gamma_buffer_release_entry_callback(ResourceReleasePhase phase,
+		bool isCommit,
+		bool isTopLevel,
+		void *arg)
+{
+	if (phase == RESOURCE_RELEASE_BEFORE_LOCKS)
+	{
+		gamma_toc_entry *cur_entry = (gamma_toc_entry *) arg;
+
+#if 0
+		elog(WARNING, "[sub ref callback]entry: %d/%d/%d, refcount:%d",
+				cur_entry->relid,
+				cur_entry->rgid,
+				cur_entry->attno,
+				cur_entry->refcount);
+#endif
+		pg_atomic_fetch_sub_u32(&cur_entry->refcount, 1);
+	}
+}
+	
+void
+gamma_buffer_register_cv(Oid relid, Oid rgid, int16 attno)
+{
+	gamma_toc_entry *cur_entry;
+	gamma_toc *toc = gamma_buffer_dsm_toc();
+	gamma_toc_lock_acquire_s(toc);
+	cur_entry = gamma_toc_get_entry(toc, relid, rgid, attno);
+	RegisterResourceReleaseCallback(gamma_buffer_release_entry_callback, (void *)cur_entry);
+	gamma_toc_lock_release(toc);
+}
+
+void
+gamma_buffer_release_cv(Oid relid, Oid rgid, int16 attno)
+{
+	gamma_toc_entry *cur_entry;
+	gamma_toc *toc = gamma_buffer_dsm_toc();
+	gamma_toc_lock_acquire_s(toc);
+	cur_entry = gamma_toc_get_entry(toc, relid, rgid, attno);
+#if 0
+	elog(WARNING, "[sub ref release] entry: %d/%d/%d, refcount:%d",
+			cur_entry->relid,
+			cur_entry->rgid,
+			cur_entry->attno,
+			cur_entry->refcount);
+#endif
+	pg_atomic_fetch_sub_u32(&cur_entry->refcount, 1);
+	gamma_toc_lock_release(toc);
+	UnregisterResourceReleaseCallback(gamma_buffer_release_entry_callback, (void *)cur_entry);
+}

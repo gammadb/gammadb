@@ -30,8 +30,11 @@ typedef struct gamma_toc_entry
 	Oid rgid;
 	int16 attno;
 	int16 flags;			/* for memory align, nouse now */
+	pg_atomic_uint32 refcount;
 	Size values_offset;		/* Offset, in bytes, from TOC start */
 	Size nbytes;
+	uint32 fifo_next;
+	uint32 fifo_prev;
 } gamma_toc_entry;
 
 #define GAMMA_MINMAX_LENGTH (16)
@@ -63,7 +66,9 @@ typedef struct gamma_toc gamma_toc;
 extern gamma_toc *gamma_toc_create(uint64 magic, void *address, Size nbytes);
 extern gamma_toc *gamma_toc_attach(uint64 magic, void *address);
 extern bool gamma_toc_lookup(gamma_toc *toc, Oid relid, Oid rgid, int16 attno,
-				gamma_buffer_cv *cv);
+									gamma_buffer_cv *cv);
+extern gamma_toc_entry * gamma_toc_get_entry(gamma_toc *toc, Oid relid,
+									Oid rgid, int16 attno);
 
 extern void gamma_toc_invalid_rel(gamma_toc *toc, Oid relid);
 extern void gamma_toc_invalid_rg(gamma_toc *toc, Oid relid, uint32 rgid);
