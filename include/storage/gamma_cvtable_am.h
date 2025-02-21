@@ -37,6 +37,7 @@ typedef enum GammaSKStrategy
 
 typedef bool (*gamma_sk_cmp_callback) (GammaSKStrategy strategy, Datum con,
 									char *min, char *max);
+typedef bool (*gamma_skip_cmp_callback) (GammaSKStrategy strategy, Datum con, Datum val);
 
 typedef struct GammaScanKeyData
 {
@@ -47,7 +48,17 @@ typedef struct GammaScanKeyData
 	gamma_sk_cmp_callback sk_cmp;
 } GammaScanKeyData;
 
+typedef struct GammaSkipKeyData
+{
+	AttrNumber skip_attno;
+	GammaSKStrategy skip_strategy;
+	Oid skip_collation;
+	Datum skip_argument;
+	gamma_skip_cmp_callback skip_cmp;
+} GammaSkipKeyData;
+
 typedef GammaScanKeyData *GammaScanKey;
+typedef GammaSkipKeyData *GammaSkipKey;
 
 /* for [parallel] scan */
 typedef struct RowGroupCtableScanDescData
@@ -89,11 +100,16 @@ typedef struct CVScanDescData {
 	/* projection info*/
 	Bitmapset *bms_proj;
 
-	/* columnar scankeys */
+	/* row group scankeys */
 	GammaScanKey scankeys;
 	uint16 sk_count;
 	List *sk_attno_list;
 	bool *sk_preloaded;
+
+	/* column vector skipkeys */
+	GammaSkipKey skipkeys;
+	uint16 skip_count;
+	//List *skip_attno_list;
 
 	bool inited;
 } CVScanDescData;

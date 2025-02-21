@@ -56,7 +56,10 @@ extern bool					gammadb_delta_table_merge_all;
 extern int					gammadb_buffers;
 
 extern double				gammadb_stats_analyze_tuple_factor;
+
+
 extern int					gammadb_cv_compress_method;
+extern bool					gammadb_storage_skip_keys;
 
 extern bool					gammadb_rewrite_grouping_const;
 extern bool					gammadb_rewrite_simplify_grouping;
@@ -170,6 +173,14 @@ gamma_guc_init(void)
 							 "sum(c1+1) => sum(c1) + 1 * count(*)",
 							 NULL,
 							 &gammadb_rewrite_extract_agg,
+							 true,
+							 PGC_USERSET,
+							 GUC_NOT_IN_SAMPLE,
+							 NULL, NULL, NULL);
+	DefineCustomBoolVariable("gammadb_storage_skip_keys",
+							 "gammadb skip keys",
+							 NULL,
+							 &gammadb_storage_skip_keys,
 							 true,
 							 PGC_USERSET,
 							 GUC_NOT_IN_SAMPLE,

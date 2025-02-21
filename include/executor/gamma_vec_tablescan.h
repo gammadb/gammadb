@@ -26,9 +26,15 @@
 typedef struct VecSeqScanState
 {
 	SeqScanState sss;
+
+	/* row group scankeys*/
 	GammaScanKey scankeys;
 	uint16 sk_count;
 	bool scan_over;
+
+	/* column vector skip keys */
+	GammaSkipKey skipkeys;
+	uint16 skip_count;
 }VecSeqScanState;
 
 extern const CustomPathMethods* gamma_vec_tablescan_path_methods(void);

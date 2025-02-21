@@ -17,6 +17,7 @@
 
 
 
+#include "storage/gamma_scankeys.h"
 #include "storage/ctable_vec_am.h"
 
 
@@ -37,6 +38,9 @@ vec_ctable_getnextslot(TableScanDesc scan, ScanDirection direction,
 	if (!cscan->heap)
 	{
 		bool fetch = true;
+		if (gammadb_storage_skip_keys)
+			cvscan->offset = gamma_skip_run_scankeys(cvscan, cvscan->rg, cvscan->offset);
+
 		if (cvscan->offset >= cvscan->rg->dim)
 		{
 			cvscan->offset = 0;
